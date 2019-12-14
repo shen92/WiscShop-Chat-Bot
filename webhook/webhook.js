@@ -8,6 +8,8 @@ let username = "";
 let password = "";
 let token = "";
 let i = 11;
+let products = [];
+let productTags = [];
 let cartProducts = [];
 
 async function getToken() {
@@ -26,6 +28,29 @@ async function getToken() {
     return token;
 }
 
+async function getProducts() {
+    let request = {
+        method: 'GET',
+    }
+    const serverReturn = await fetch('https://mysqlcs639.cs.wisc.edu/products/', request)
+    const serverResponse = await serverReturn.json()
+    products = serverResponse.products
+
+    return cartProducts;
+}
+
+async function getProductTags(id) {
+    productTags = [];
+    let request = {
+        method: 'GET',
+    }
+    const serverReturn = await fetch('https://mysqlcs639.cs.wisc.edu/products/' + id + '/tags', request)
+    const serverResponse = await serverReturn.json()
+    productTags = serverResponse.tags
+
+    return productTags;
+}
+
 async function getCartProducts() {
     let request = {
         method: 'GET',
@@ -33,7 +58,6 @@ async function getCartProducts() {
             'Content-Type': 'application/json',
             'x-access-token': token,
         },
-        redirect: 'follow'
     }
     const serverReturn = await fetch('https://mysqlcs639.cs.wisc.edu/application/products/', request)
     const serverResponse = await serverReturn.json()
@@ -121,7 +145,8 @@ app.post('/', express.json(), (req, res) => {
     }
 
     async function inputPassword() {
-        let text = ['Got it.',
+        let text = [
+            'Got it.',
             'Please give me some time to sign you in.',
             'Welcome to WiscShop! What can I do for you today?'
         ];
@@ -130,25 +155,24 @@ app.post('/', express.json(), (req, res) => {
             {'text': '' + agent.query, 'isUser': true}
         )
         password = agent.parameters.password
+        agent.add(text[0])
+        agent.add(text[1])
+        await getToken()
+
+        //Init page
+        await _put(
+            'https://mysqlcs639.cs.wisc.edu/application',
+            {'page': '/' + username}
+        )
+        await _delete(
+            'https://mysqlcs639.cs.wisc.edu/application/messages'
+        )
+        agent.add(text[2])
         await _post(
             'https://mysqlcs639.cs.wisc.edu/application/messages',
-            {'text': '' + text[1], 'isUser': false}
+            {'text': '' + text[2], 'isUser': false}
         )
-        await getToken()
-        let url = 'https://mysqlcs639.cs.wisc.edu/application'
-        let body = {
-            'page': '/' + username
-        }
-        await _put(url, body)
-        url = 'https://mysqlcs639.cs.wisc.edu/application/messages'
-        await _delete(url)
-        body = {
-            'text': '' + text[2],
-            'isUser': false
-        }
-        await _post(url, body)
-
-
+        await getProducts()
     }
 
     //Browse methods
@@ -162,8 +186,8 @@ app.post('/', express.json(), (req, res) => {
             'https://mysqlcs639.cs.wisc.edu/application/messages',
             {'text': '' + agent.query, 'isUser': true})
         if (agent.parameters.page !== null) {
-            i++;
-            let index = (i + 1) % successText.length;
+            i++
+            let index = (i + 1) % successText.length
             agent.add(successText[index])
             await _post(
                 'https://mysqlcs639.cs.wisc.edu/application/messages',
@@ -206,7 +230,7 @@ app.post('/', express.json(), (req, res) => {
             'https://mysqlcs639.cs.wisc.edu/application/messages',
             {'text': '' + agent.query, 'isUser': true}
         )
-        if (agent.parameters.product !== null) {
+        if (agent.parameters.category !== null) {
             i++;
             let index = (i + 1) % successText.length;
             agent.add(successText[index])
@@ -216,9 +240,63 @@ app.post('/', express.json(), (req, res) => {
             )
             await _put(
                 'https://mysqlcs639.cs.wisc.edu/application',
-                {'page': '/' + username + '/' + agent.parameters.product}
+                {'page': '/' + username + '/' + agent.parameters.category}
             )
         }
+    }
+
+    async function queryCategoryWithTagIntent() {
+        let successText = [
+            'No Problem.',
+            'Here\'s what you are looking for.',
+            'Okay.',
+            'I found these products we have.',
+            'These should be the products you want.',
+            'Sure.'
+        ];
+
+        await _post(
+            'https://mysqlcs639.cs.wisc.edu/application/messages',
+            {'text': '' + agent.query, 'isUser': true}
+        )
+
+        await _put(
+            'https://mysqlcs639.cs.wisc.edu/application',
+            {'page': '/' + username + '/' + agent.parameters.category}
+        )
+
+        //Filter the products
+        let targetProducts = [];
+        for (const product of Object.values(products)) {
+            if (product.category === agent.parameters.category) {
+                await getProductTags(product.id)
+                for (const tag of Object.values(productTags)) {
+                    if (tag === agent.parameters.tag) {
+                        targetProducts.push(product)
+                    }
+                }
+            }
+        }
+
+        if (targetProducts.length !== 0) {
+            i++;
+            let index = (i + 1) % successText.length;
+            agent.add(successText[index])
+            await _post(
+                'https://mysqlcs639.cs.wisc.edu/application/messages',
+                {'text': '' + successText[index], 'isUser': false}
+            )
+        } else {
+            await _post(
+                'https://mysqlcs639.cs.wisc.edu/application/messages',
+                {'text': 'Sorry, there\'s no product matches your preference.', 'isUser': false}
+            )
+        }
+        let tags = agent.parameters.tag
+
+        await _post(
+            'https://mysqlcs639.cs.wisc.edu/application/tags/' + tags,
+        )
     }
 
     //Cart methods
@@ -310,8 +388,8 @@ app.post('/', express.json(), (req, res) => {
             'https://mysqlcs639.cs.wisc.edu/application/messages',
             {'text': '' + agent.query, 'isUser': true}
         )
-        i++;
-        let index = (i + 1) % text.length;
+        i++
+        let index = (i + 1) % text.length
         agent.add(text[index])
         await _post(
             'https://mysqlcs639.cs.wisc.edu/application/messages',
@@ -327,6 +405,7 @@ app.post('/', express.json(), (req, res) => {
     //Browse methods
     intentMap.set('Navigate Intent', navigate)
     intentMap.set('Query Category Intent', queryCategory)
+    intentMap.set('Query Category with Tag Intent', queryCategoryWithTagIntent)
     //Cart methods
     intentMap.set('Query Cart Num Intent', queryCartNum)
     intentMap.set('Query Cart Sum Intent', queryCartSum)
